@@ -5,7 +5,7 @@
 
 // change this to your deployed backend's URL once it's hosted somewhere --
 // localhost only works while you're testing on your own computer
-const API_BASE = 'https://florist-knew-labels-trees.trycloudflare.com/api';
+const API_BASE = 'https://cooperation-voip-everything-advert.trycloudflare.com/api';
 
 const TOKEN_KEY = 'collectscan_token'; // item data now lives on the server, just the login token stays local
 const CATEGORIES = ['Cards', 'Cars', 'Lego', 'Figurines', 'Other'];
