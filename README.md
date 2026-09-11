@@ -1,56 +1,49 @@
-# CollectScan 
+# CollectScan
 
-### What I Built
+CollectScan, VCE Applied Computing Unit 3&4 SAT project (Unit 3 + Unit 4 Outcome 1). A browser based app for cataloguing collectables (cards, cars, Lego, figurines), scan or add items, avoid buying duplicates, and see stats on your collection. No install.
 
-I wanted to build a clean, mobile-first web app that solves a very specific headache for collectors: keeping track of what you own so you don't accidentally buy the exact same card or figure twice at a convention or store.
+## What it does
 
-Since it's built entirely in vanilla HTML, CSS, and JavaScript with zero backend bloat, it runs instantly right in your browser and stores everything securely in `localStorage`.
+- Log items by hand, or take a photo and let an AI model (Gemini) fill in the name, series and year and so on for you
+- Warns you if you're about to add something you already have, checking as soon as a name shows up, whether you typed it or it came from a photo
+- Search, sort, and filter your collection by category, condition, or favourites
+- A stats page showing totals, a category breakdown, and a callout for possible duplicates
+- Accounts, so your collection is tied to you and follows you between devices instead of living in one browser
+- A shareable link if you want someone else to see your collection without needing to log in
 
-Key features include:
+## How it's built
 
-* **Duplicate Warning System:** A live check built into the manual add form that alerts you if you're about to log an item with a name you already own.
-* **Smart Collection View:** Filter, search, and sort your items by category (Cards, Cars, Lego, Figurines), condition, or favourites.
-* **Offline Photo Handling:** Snap a photo using your device camera or upload one directly to attach to your item profile.
-* **Instant Stats Dashboard:** Clean breakdowns of your total collection size, category distribution, autographed counts, and a dedicated possible-duplicates callout.
-* **Sample Data Loader:** A quick option to populate the app with demo items so you can test out the UI immediately without starting from scratch.
+The frontend is plain HTML, CSS and JavaScript, no frameworks, and is hosted for free on GitHub Pages. The backend is a small Node/Express server with a SQLite database, running on a Raspberry Pi at home, exposed to the internet through a Cloudflare Tunnel rather than opening up my router. Photos are stored as base64 in the database, and the AI photo identification calls Google's Gemini API.
 
----
+## Using the live site
 
-### How to Use It (As a Regular User)
+The app is live at `https://cpavlou2323.github.io/CollectScan/`. Create an account, then either tap Scan to photograph an item and auto-fill the details, or Manual Add to type them in yourself. Everything gets saved to your account, viewable from the Collection tab, and summarised on the Stats tab.
 
-You can check out the live site here: **[Link to GitHub Pages View]** *(or run it locally below)*.
+## Running it yourself
 
-1. **Getting Started:** When you first open the app, tap the **"Load sample items"** link on the home screen to populate some demo cards and figurines, or jump straight into **Manual Add** to log your own items.
-2. **Cataloguing an Item:** Tap **Manual Add**, fill in the item details (name, category, condition, price, and notes), and attach a photo if you have one. If the name matches something you already own, the app will flag it.
-3. **Managing Your Collection:** Head over to the **Collection** tab to search and filter through your items. Tap any item to view its full details, toggle your favourites, add extra photos, or edit/delete entries.
-4. **Checking Stats:** Tap the **Stats** tab to see a breakdown of your items by category, total value/count, and any potential duplicate risks.
+The frontend and backend are separate pieces, so both need to be running for the app to actually work end to end.
 
----
-
-### Running It Locally (For Developers)
-
-If you want to run or test the prototype locally on your machine:
-
-1. Clone or download this repository:
+**Backend**
 ```bash
-git clone https://github.com/[your-username]/collectscan.git
-
+cd Backend
+npm install
+cp .env.example .env   # fill in JWT_SECRET and GEMINI_API_KEY
+node server.js
 ```
+This runs on `http://localhost:3001` by default.
 
+**Frontend**
 
-2. Navigate into the folder and start a tiny local server to avoid browser `file://` security quirks:
+Open `index.html` directly, or serve it with any static server, for example:
 ```bash
 python3 -m http.server 8000
+```
+Then update the `API_BASE` constant near the top of `app.js` to point at wherever your backend is actually running.
+
+## Project structure
 
 ```
-
-
-3. Open your browser and go to `http://localhost:8000`.
-
----
-
-### Tech Stack
-
-* **Frontend:** Vanilla HTML5, CSS3 (Mobile-first, pill-button design system)
-* **Logic:** Pure JavaScript (ES6 Classes: `Item`, `CollectionStore`, `ProfileStore`, and `CollectScanApp`)
-* **Storage:** Browser `localStorage`
+index.html, style.css, app.js   frontend files
+Backend/                        Express server, SQLite database, and the routes for auth, items, AI identify, and the public share view
+setup_notes.txt                 my own notes on how I set the whole thing up and deployed it, kept for reference
+```
