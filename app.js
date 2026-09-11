@@ -5,7 +5,7 @@
 
 // change this to your deployed backend's URL once it's hosted somewhere --
 // localhost only works while you're testing on your own computer
-const API_BASE = 'https://cincinnati-population-migration-money.trycloudflare.com/api';
+const API_BASE = 'https://collectscan.projectninetyone.com/api';
 
 const TOKEN_KEY = 'collectscan_token'; // item data now lives on the server, just the login token stays local
 const CATEGORIES = ['Cards', 'Cars', 'Lego', 'Figurines', 'Other'];
@@ -38,7 +38,7 @@ class ApiClient {
     try {
       res = await fetch(`${API_BASE}${path}`, { ...options, headers });
     } catch (err) {
-      throw new Error("couldn't reach the server -- is the backend running?");
+      throw new Error("couldn't reach the server, is the backend running?");
     }
 
     let body = null;
@@ -49,7 +49,7 @@ class ApiClient {
     // the backend's own message ("incorrect email or password") is more useful.
     if (res.status === 401 && hadToken) {
       this.setToken(null);
-      throw new Error('signed out -- please log in again');
+      throw new Error('signed out, please log in again');
     }
 
     if (!res.ok) throw new Error((body && body.error) || `request failed (${res.status})`);
@@ -64,6 +64,9 @@ class ApiClient {
   }
   getProfile() { return this.#request('/me'); }
   setProfile(displayName) { return this.#request('/me', { method: 'PUT', body: JSON.stringify({ displayName }) }); }
+  getShareInfo() { return this.#request('/me/share'); }
+  resetShare() { return this.#request('/me/share/reset', { method: 'POST' }); }
+  getPublicCollection(token) { return this.#request('/public/' + encodeURIComponent(token)); }
 
   getItems() { return this.#request('/items'); }
   createItem(data) { return this.#request('/items', { method: 'POST', body: JSON.stringify(data) }); }
@@ -291,6 +294,43 @@ function categoryInitial(category) {
   return (category || '?').charAt(0).toUpperCase();
 }
 
+// small hand-drawn line icon set -- keeps everything one consistent visual
+// style (rounded, single weight, no colour) instead of mixing emoji, which
+// render differently on every device and don't match the rest of the ui
+const ICON_MARKUP = {
+  back: '<path d="M15 5l-7 7 7 7"/>',
+  close: '<path d="M6 6l12 12M18 6L6 18"/>',
+  profile: '<circle cx="12" cy="8" r="3.3"/><path d="M5 20c1.4-4.2 4.2-6.3 7-6.3s5.6 2.1 7 6.3"/>',
+  home: '<path d="M4 11.5L12 4l8 7.5"/><path d="M6.5 10v9.5H10V15h4v4.5h3.5V10"/>',
+  camera: '<rect x="3" y="7" width="18" height="12.5" rx="2.5"/><path d="M8.2 7l1.3-2.3h5l1.3 2.3"/><circle cx="12" cy="13.2" r="3.4"/>',
+  collection: '<rect x="4" y="4" width="7" height="7" rx="1.4"/><rect x="13" y="4" width="7" height="7" rx="1.4"/><rect x="4" y="13" width="7" height="7" rx="1.4"/><rect x="13" y="13" width="7" height="7" rx="1.4"/>',
+  stats: '<path d="M5 20V11" stroke-width="2.6"/><path d="M12 20V4" stroke-width="2.6"/><path d="M19 20v-7" stroke-width="2.6"/>',
+  chevronLeft: '<path d="M14.5 5.5l-6 6.5 6 6.5"/>',
+  chevronRight: '<path d="M9.5 5.5l6 6.5-6 6.5"/>',
+  star: { line: '<path d="M12 4.5l2.15 4.62 5.1.62-3.75 3.5.98 5.02L12 15.9l-4.48 2.36.98-5.02-3.75-3.5 5.1-.62L12 4.5z"/>', filled: '<path d="M12 4.5l2.15 4.62 5.1.62-3.75 3.5.98 5.02L12 15.9l-4.48 2.36.98-5.02-3.75-3.5 5.1-.62L12 4.5z" fill="currentColor"/>' },
+  search: '<circle cx="10.3" cy="10.3" r="6.3"/><path d="M20 20l-4.8-4.8"/>',
+  sort: '<path d="M8 5.5v13M8 5.5L5 9M8 5.5l3 3.5"/><path d="M16 18.5v-13M16 18.5l3-3.5M16 18.5l-3-3.5"/>',
+  filter: '<line x1="4" y1="6.5" x2="20" y2="6.5"/><circle cx="9" cy="6.5" r="2" fill="currentColor"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="15" cy="12" r="2" fill="currentColor"/><line x1="4" y1="17.5" x2="20" y2="17.5"/><circle cx="7" cy="17.5" r="2" fill="currentColor"/>',
+  upload: '<path d="M12 16V4M12 4l-4 4M12 4l4 4"/><path d="M4 16v3a2 2 0 002 2h12a2 2 0 002-2v-3"/>',
+  refresh: '<path d="M4.5 9a7.5 7.5 0 0112.7-4.2L19.5 7"/><path d="M19.5 3.8v3.7h-3.7"/><path d="M19.5 15a7.5 7.5 0 01-12.7 4.2L4.5 17"/><path d="M4.5 20.2v-3.7h3.7"/>',
+  warning: '<path d="M12 3.5L21 19H3L12 3.5z"/><path d="M12 9.7v4"/><circle cx="12" cy="16.4" r="0.9" fill="currentColor"/>',
+  target: '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/><path d="M12 2.3v3M12 18.7v3M2.3 12h3M18.7 12h3"/>',
+  share: '<circle cx="6" cy="12" r="2.1"/><circle cx="17.3" cy="5.8" r="2.1"/><circle cx="17.3" cy="18.2" r="2.1"/><path d="M7.9 10.8l7.5-3.9M7.9 13.2l7.5 3.9"/>',
+  copy: '<rect x="8.3" y="8.3" width="11" height="11" rx="2"/><path d="M4.7 15.7V6.7a2 2 0 012-2h9"/>',
+  check: '<path d="M5 12.5l4.4 4.4L19 7.3"/>',
+  crate: '<path d="M3 8l9-4 9 4-9 4-9-4z"/><path d="M3 8v9l9 4 9-4V8"/><path d="M12 12v9"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+};
+
+function icon(name, opts = {}) {
+  const size = opts.size || 20;
+  const strokeWidth = opts.strokeWidth || 1.8;
+  const entry = ICON_MARKUP[name];
+  const inner = (entry && typeof entry === 'object') ? (opts.active ? entry.filled : entry.line) : (entry || '');
+  const extraClass = opts.className ? ' ' + opts.className : '';
+  return `<svg class="icon icon-${name}${extraClass}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+}
+
 // splits "data:image/jpeg;base64,xxxx" into its media type and raw base64 -- the
 // identify endpoint wants those as separate fields, same shape the backend's /api/identify route expects
 function parseDataUrl(dataUrl) {
@@ -374,11 +414,88 @@ class CollectScanApp {
 
   async init() {
     this.#bindStaticControls();
+
+    // a shared collection link looks like ?share=TOKEN -- anyone who opens
+    // it sees a read-only view with no login required, whether or not
+    // they're already signed in to their own account in this browser
+    const shareToken = new URLSearchParams(window.location.search).get('share');
+    if (shareToken) {
+      await this.#loadPublicView(shareToken);
+      return;
+    }
+
     if (this.#api.isLoggedIn) {
       await this.#bootAuthenticated();
     } else {
       this.#goTo('auth');
     }
+  }
+
+  async #loadPublicView(token) {
+    document.body.classList.add('public-mode');
+    const views = ['auth', 'home', 'collection', 'detail', 'form', 'scan', 'stats', 'public'];
+    for (const v of views) document.getElementById('view-' + v).hidden = v !== 'public';
+
+    const container = document.getElementById('view-public');
+    container.innerHTML = `<p class="hint-text">Loading collection\u2026</p>`;
+    try {
+      const data = await this.#api.getPublicCollection(token);
+      this.#renderPublicCollection(data);
+    } catch (err) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">${icon('crate', { size: 24 })}</div>
+          <p class="empty-title">This link isn't valid</p>
+          <p class="empty-subtitle">${escapeHTML(err.message || "That share link doesn't exist any more.")}</p>
+          <a class="btn" href="${window.location.pathname}">Go to CollectScan</a>
+        </div>
+      `;
+    }
+  }
+
+  #renderPublicCollection(data) {
+    const container = document.getElementById('view-public');
+    const items = data.items || [];
+    const groups = CATEGORIES
+      .map((cat) => ({ cat, list: items.filter((item) => item.category === cat) }))
+      .filter((group) => group.list.length > 0);
+
+    const body = items.length === 0
+      ? `<p class="empty-subtitle" style="text-align:center;">This collection is empty so far.</p>`
+      : groups.map((group) => `
+          <div class="category-group">
+            <span class="pill pill-dark">${escapeHTML(group.cat)} &middot; ${group.list.length}</span>
+            <div class="item-grid">
+              ${group.list.map((item) => this.#publicItemCardHTML(item)).join('')}
+            </div>
+          </div>
+        `).join('');
+
+    container.innerHTML = `
+      <div class="public-header">
+        <span class="pill pill-dark">${escapeHTML(data.displayName || 'Collector')}'s Collection</span>
+        <a class="muted-link" href="${window.location.pathname}">Log in to CollectScan</a>
+      </div>
+      ${body}
+    `;
+  }
+
+  #publicItemCardHTML(item) {
+    const thumb = item.images && item.images[0]
+      ? `<img src="${item.images[0]}" alt="">`
+      : categoryInitial(item.category);
+    return `
+      <div class="item-card" style="cursor:default;">
+        <div class="item-thumb">
+          ${thumb}
+          ${item.favourite ? `<span class="fav-badge">${icon('star', { size: 11, active: true })}</span>` : ''}
+        </div>
+        <div class="item-meta">
+          <p class="item-name">${escapeHTML(item.name || 'Untitled item')}</p>
+          ${item.series ? `<p class="item-series">${escapeHTML(item.series)}</p>` : ''}
+        </div>
+      </div>
+    `;
   }
 
   // after a fresh login/signup, or on startup with a token already saved
@@ -409,6 +526,12 @@ class CollectScanApp {
   }
 
   #bindStaticControls() {
+    document.getElementById('back-btn').innerHTML = icon('back', { size: 16 });
+    document.getElementById('profile-btn').innerHTML = icon('profile', { size: 16 });
+    for (const el of document.querySelectorAll('[data-icon]')) {
+      el.innerHTML = icon(el.dataset.icon, { size: 18 });
+    }
+
     document.getElementById('back-btn').addEventListener('click', () => this.#goTo('home'));
     document.getElementById('profile-btn').addEventListener('click', () => this.#openProfileModal());
 
@@ -502,7 +625,7 @@ class CollectScanApp {
     const titleEl = document.getElementById('top-bar-title');
     document.body.classList.toggle('auth-mode', this.#view === 'auth');
 
-    const views = ['auth', 'home', 'collection', 'detail', 'form', 'scan', 'stats'];
+    const views = ['auth', 'home', 'collection', 'detail', 'form', 'scan', 'stats', 'public'];
     for (const v of views) {
       document.getElementById('view-' + v).hidden = v !== this.#view;
     }
@@ -574,7 +697,7 @@ class CollectScanApp {
     let stageHTML;
     if (items.length === 0) {
       stageHTML = `
-        <div class="hero-box"><span class="sparkle">&#10022;</span></div>
+        <div class="hero-box">${icon('crate', { size: 40 })}</div>
         <p class="empty-title">Add your first item today</p>
         <button class="muted-link" id="home-load-sample">or load sample items to explore</button>
       `;
@@ -584,9 +707,9 @@ class CollectScanApp {
         : categoryInitial(current.category);
       stageHTML = `
         <div class="carousel-row">
-          <button class="round-btn" id="home-prev" aria-label="Previous">&#8249;</button>
+          <button class="round-btn" id="home-prev" aria-label="Previous">${icon('chevronLeft', { size: 15 })}</button>
           <button class="card-frame" id="home-open-current">${thumb}</button>
-          <button class="round-btn" id="home-next" aria-label="Next">&#8250;</button>
+          <button class="round-btn" id="home-next" aria-label="Next">${icon('chevronRight', { size: 15 })}</button>
         </div>
         <p class="hint-text">${favourites.length ? 'Favourites' : 'Recently added'} &middot; ${this.#homeIndex + 1}/${source.length}</p>
         <p style="font-size:13px;font-weight:600;margin:0;">${escapeHTML(current.name || 'Untitled item')}</p>
@@ -635,7 +758,7 @@ class CollectScanApp {
     if (items.length === 0) {
       container.innerHTML = `
         <div class="empty-state">
-          <div class="empty-icon">&#9633;</div>
+          <div class="empty-icon">${icon('crate', { size: 24 })}</div>
           <p class="empty-title">Your collection is empty</p>
           <p class="empty-subtitle">Scan an item or add one manually to start building your library.</p>
           <div class="btn-row">
@@ -653,13 +776,13 @@ class CollectScanApp {
 
     container.innerHTML = `
       <div class="search-bar">
-        <span>&#128269;</span>
+        <span>${icon('search', { size: 16 })}</span>
         <input type="text" id="search-input" placeholder="Search name, series, category" value="${escapeHTML(this.#searchQuery)}">
-        ${this.#searchQuery ? '<button id="clear-search" aria-label="Clear search">&times;</button>' : ''}
+        ${this.#searchQuery ? `<button id="clear-search" aria-label="Clear search">${icon('close', { size: 12 })}</button>` : ''}
       </div>
       <div class="toolbar-row">
-        <button class="toolbar-btn" id="toggle-sort">&#8645; Sort</button>
-        <button class="toolbar-btn" id="toggle-filter">&#9776; Filter${activeFilterCount ? ' (' + activeFilterCount + ')' : ''}</button>
+        <button class="toolbar-btn" id="toggle-sort">${icon('sort', { size: 14 })} Sort</button>
+        <button class="toolbar-btn" id="toggle-filter">${icon('filter', { size: 14 })} Filter${activeFilterCount ? ' (' + activeFilterCount + ')' : ''}</button>
         ${activeFilterCount ? '<button class="clear-link" id="clear-filters">Clear</button>' : ''}
       </div>
       <div id="panel-slot"></div>
@@ -810,7 +933,7 @@ class CollectScanApp {
       <button class="item-card" data-item-id="${item.id}">
         <div class="item-thumb">
           ${thumb}
-          ${item.favourite ? '<span class="fav-badge">&#9733;</span>' : ''}
+          ${item.favourite ? `<span class="fav-badge">${icon('star', { size: 11, active: true })}</span>` : ''}
         </div>
         <div class="item-meta">
           <p class="item-name">${escapeHTML(item.name || 'Untitled item')}</p>
@@ -850,7 +973,7 @@ class CollectScanApp {
       ${item.series ? `<span class="pill pill-light">${escapeHTML(item.series)}</span>` : ''}
       <div class="detail-image">
         ${imageHTML}
-        <button class="fav-toggle${item.favourite ? ' active' : ''}" id="toggle-fav" aria-label="Toggle favourite">&#9733;</button>
+        <button class="fav-toggle${item.favourite ? ' active' : ''}" id="toggle-fav" aria-label="Toggle favourite">${icon('star', { size: 16, active: item.favourite })}</button>
       </div>
       ${thumbStrip}
       ${tags ? `<div class="tag-row">${tags}</div>` : ''}
@@ -936,6 +1059,10 @@ class CollectScanApp {
 
     container.innerHTML = this.#formHTML(data);
     this.#bindFormEvents(data);
+    // catches the case where a name arrives already filled in (auto-identify,
+    // or editing an existing item) rather than typed by hand -- without this,
+    // the warning only ever appeared if you edited the name field yourself
+    if (data.name) this.#checkDuplicateWarning(data.id);
   }
 
   #formHTML(data) {
@@ -986,7 +1113,7 @@ class CollectScanApp {
 
       <div class="toggle-row">
         <button class="toggle-btn${this.#formAutograph ? ' active' : ''}" id="toggle-autograph" type="button">Autograph</button>
-        <button class="toggle-btn${this.#formFavourite ? ' active' : ''}" id="toggle-favourite" type="button">&#9733; Favourite</button>
+        <button class="toggle-btn${this.#formFavourite ? ' active' : ''}" id="toggle-favourite" type="button">${icon('star', { size: 13, active: this.#formFavourite })} Favourite</button>
       </div>
 
       <div class="field">
@@ -1007,11 +1134,11 @@ class CollectScanApp {
     row.innerHTML = this.#formImages.map((src, i) => `
       <div class="photo-thumb">
         <img src="${src}" alt="">
-        <button class="photo-remove" data-remove-index="${i}" aria-label="Remove photo">&times;</button>
+        <button class="photo-remove" data-remove-index="${i}" aria-label="Remove photo">${icon('close', { size: 10 })}</button>
       </div>
     `).join('') + `
-      <button class="photo-add" id="photo-upload-btn" type="button">&#8593;<br>Upload</button>
-      <button class="photo-add" id="photo-camera-btn" type="button">&#128247;<br>Camera</button>
+      <button class="photo-add" id="photo-upload-btn" type="button">${icon('upload', { size: 17 })}<span>Upload</span></button>
+      <button class="photo-add" id="photo-camera-btn" type="button">${icon('camera', { size: 17 })}<span>Camera</span></button>
     `;
     for (const btn of row.querySelectorAll('[data-remove-index]')) {
       btn.addEventListener('click', () => {
@@ -1053,7 +1180,9 @@ class CollectScanApp {
     });
     document.getElementById('toggle-favourite').addEventListener('click', () => {
       this.#formFavourite = !this.#formFavourite;
-      document.getElementById('toggle-favourite').classList.toggle('active', this.#formFavourite);
+      const btn = document.getElementById('toggle-favourite');
+      btn.classList.toggle('active', this.#formFavourite);
+      btn.innerHTML = `${icon('star', { size: 13, active: this.#formFavourite })} Favourite`;
     });
     document.getElementById('form-cancel').addEventListener('click', () => this.#goTo('collection'));
     document.getElementById('form-save').addEventListener('click', () => this.#submitForm(data.id));
@@ -1066,7 +1195,7 @@ class CollectScanApp {
     if (dups.length > 0) {
       slot.innerHTML = `
         <div class="confirm-box amber">
-          <p>You already have ${dups.length} item${dups.length > 1 ? 's' : ''} named "${escapeHTML(name.trim())}" &mdash; check your collection before buying another.</p>
+          <p>You already have ${dups.length} item${dups.length > 1 ? 's' : ''} named "${escapeHTML(name.trim())}". Check your collection before buying another.</p>
         </div>
       `;
     } else {
@@ -1135,7 +1264,7 @@ class CollectScanApp {
         <p class="hint-text">Line it up, then tap the button to take the photo.</p>
         <div class="scan-preview" id="scan-preview"><video id="camera-video" autoplay playsinline muted></video></div>
         <div class="camera-controls">
-          <button class="icon-btn" id="camera-cancel" aria-label="Cancel">&times;</button>
+          <button class="icon-btn" id="camera-cancel" aria-label="Cancel">${icon('close', { size: 14 })}</button>
           <button class="shutter-btn" id="camera-shutter" aria-label="Take photo"></button>
           <span class="shutter-spacer"></span>
         </div>
@@ -1152,18 +1281,18 @@ class CollectScanApp {
 
     container.innerHTML = `
       <p class="hint-text">Capture or upload a photo of your collectable, then confirm the details.</p>
-      <div class="scan-preview" id="scan-preview">${image ? `<img src="${image}" alt="">` : '&#128247;'}</div>
+      <div class="scan-preview" id="scan-preview">${image ? `<img src="${image}" alt="">` : icon('camera', { size: 28 })}</div>
       ${!image ? `
         <div class="btn-row">
           <button class="btn" id="scan-take" style="flex:1;">Take Photo</button>
           <button class="btn btn-outline" id="scan-upload" style="flex:1;">Upload Photo</button>
         </div>
       ` : `
-        <button class="muted-link" id="scan-retake" style="align-self:center;" ${this.#identifying ? 'disabled' : ''}>&#8635; Retake photo</button>
+        <button class="muted-link" id="scan-retake" style="align-self:center;" ${this.#identifying ? 'disabled' : ''}>${icon('refresh', { size: 13 })} Retake photo</button>
         <button class="btn btn-block" id="scan-identify" ${this.#identifying ? 'disabled' : ''}>
-          ${this.#identifying ? 'Identifying\u2026' : '\u2728 Auto-Identify with AI'}
+          ${this.#identifying ? 'Identifying\u2026' : icon('target', { size: 14 }) + ' Auto-Identify with AI'}
         </button>
-        <button class="muted-link" id="scan-continue" style="align-self:center;" ${this.#identifying ? 'disabled' : ''}>Skip \u2014 enter details manually</button>
+        <button class="muted-link" id="scan-continue" style="align-self:center;" ${this.#identifying ? 'disabled' : ''}>Skip, enter details manually</button>
       `}
       <input type="file" accept="image/*" capture="environment" id="scan-camera-input" hidden>
       <input type="file" accept="image/*" id="scan-upload-input" hidden>
@@ -1221,7 +1350,7 @@ class CollectScanApp {
       this.#goTo('form', { formMode: 'add', formPrefill: { images: [img], ...guess } });
     } catch (err) {
       this.#identifying = false;
-      this.#notify(err.message || "Couldn't identify that -- try entering details manually");
+      this.#notify(err.message || "Couldn't identify that, try entering details manually");
       this.#renderScan();
     }
   }
@@ -1236,7 +1365,7 @@ class CollectScanApp {
       this.#cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
       this.#renderScan();
     } catch (err) {
-      this.#notify("Couldn't access the camera -- pick a photo instead");
+      this.#notify("Couldn't access the camera, pick a photo instead");
       document.getElementById('scan-camera-input').click();
     }
   }
@@ -1278,7 +1407,7 @@ class CollectScanApp {
     if (items.length === 0) {
       container.innerHTML = `
         <div class="empty-state">
-          <div class="empty-icon">&#128202;</div>
+          <div class="empty-icon">${icon('stats', { size: 22 })}</div>
           <p class="empty-title">No stats yet</p>
           <p class="empty-subtitle">Add a few items to your collection to see totals and breakdowns here.</p>
         </div>
@@ -1298,7 +1427,7 @@ class CollectScanApp {
 
     const dupSection = duplicateGroups.length > 0 ? `
       <div>
-        <p class="section-heading" style="color:var(--amber);">&#9888; Possible Duplicates</p>
+        <p class="section-heading" style="color:var(--amber);">${icon('warning', { size: 13 })} Possible Duplicates</p>
         ${duplicateGroups.map((group) => `
           <div class="dup-group">
             <strong>${escapeHTML(group[0].name)} &middot; ${group.length} copies</strong>
@@ -1338,7 +1467,7 @@ class CollectScanApp {
         <div class="modal-box">
           <div class="modal-head">
             <h2>Your Profile</h2>
-            <button id="profile-close" aria-label="Close">&times;</button>
+            <button id="profile-close" aria-label="Close">${icon('close', { size: 15 })}</button>
           </div>
           <p class="modal-note">Signed in as ${escapeHTML(this.#profile.email)}</p>
           <div class="field">
@@ -1346,6 +1475,11 @@ class CollectScanApp {
             <input type="text" id="profile-name-input" value="${escapeHTML(this.#profile.name)}">
           </div>
           <button class="btn btn-block" id="profile-save">Save</button>
+          <hr class="modal-divider">
+          <div class="field">
+            <label>Share your collection</label>
+            <div id="share-slot"><button class="btn btn-outline btn-block" id="share-get-link">${icon('share', { size: 13 })} Get shareable link</button></div>
+          </div>
           <hr class="modal-divider">
           <button class="danger-link" id="logout-btn">Log out</button>
           <hr class="modal-divider">
@@ -1366,6 +1500,7 @@ class CollectScanApp {
         this.#render();
       });
     });
+    document.getElementById('share-get-link').addEventListener('click', () => this.#loadShareSlot());
     document.getElementById('logout-btn').addEventListener('click', () => {
       this.#api.setToken(null);
       close();
@@ -1375,6 +1510,35 @@ class CollectScanApp {
     });
 
     this.#renderResetSlot(false);
+  }
+
+  async #loadShareSlot(forceReset = false) {
+    const slot = document.getElementById('share-slot');
+    if (!slot) return;
+    slot.innerHTML = `<p class="hint-text">Loading link\u2026</p>`;
+    try {
+      const { token } = forceReset ? await this.#api.resetShare() : await this.#api.getShareInfo();
+      const link = `${window.location.origin}${window.location.pathname}?share=${token}`;
+      slot.innerHTML = `
+        <div class="share-row">
+          <input type="text" id="share-link-input" readonly value="${escapeHTML(link)}">
+          <button class="icon-btn" id="share-copy-btn" aria-label="Copy link">${icon('copy', { size: 14 })}</button>
+        </div>
+        <button class="muted-link" id="share-reset-btn">Generate a new link</button>
+      `;
+      document.getElementById('share-copy-btn').addEventListener('click', async () => {
+        document.getElementById('share-link-input').select();
+        try {
+          await navigator.clipboard.writeText(link);
+          this.#notify('Link copied');
+        } catch (err) {
+          this.#notify('Could not copy, select the text and copy it manually');
+        }
+      });
+      document.getElementById('share-reset-btn').addEventListener('click', () => this.#loadShareSlot(true));
+    } catch (err) {
+      slot.innerHTML = `<p class="field-error">${escapeHTML(err.message || "Couldn't load your share link")}</p>`;
+    }
   }
 
   #renderResetSlot(confirming) {

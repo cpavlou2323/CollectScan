@@ -27,6 +27,9 @@ html, body {
   background: var(--page);
   color: var(--black);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  /* keeps mobile browsers from measuring past their own address bar, which is
+     what was cutting content off at the bottom on phones */
+  height: 100%;
 }
 
 button, input, select, textarea {
@@ -35,11 +38,14 @@ button, input, select, textarea {
   color: inherit;
 }
 
+.icon { display: inline-block; vertical-align: middle; flex-shrink: 0; }
+
 /* phone-sized card */
 #app {
   max-width: var(--phone);
   margin: 24px auto;
   min-height: calc(100vh - 48px);
+  min-height: calc(100dvh - 48px); /* dvh accounts for mobile browser chrome so this doesn't overshoot the real viewport */
   background: var(--white);
   border: 1px solid var(--line);
   border-radius: 28px;
@@ -94,7 +100,9 @@ button, input, select, textarea {
 #main-content {
   flex: 1;
   padding: 28px 22px 20px;
-  padding-bottom: 72px;
+  /* clears the sticky bottom nav plus the home-indicator/gesture-bar area on
+     phones that have one -- env() falls back to 0 on devices without a notch */
+  padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
 }
 
 .view { display: flex; flex-direction: column; gap: 28px; }
@@ -144,7 +152,7 @@ button, input, select, textarea {
   align-items: center;
   justify-content: center;
 }
-.sparkle { color: var(--spark); font-size: 22px; line-height: 1; }
+.hero-box svg { color: var(--muted); }
 
 .card-frame {
   width: 170px;
@@ -210,6 +218,9 @@ button, input, select, textarea {
   text-underline-offset: 3px;
   cursor: pointer;
   padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .muted-link:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
 
@@ -332,6 +343,7 @@ button, input, select, textarea {
 .toggle-btn {
   flex: 1; border: 1px solid var(--line); background: var(--white); border-radius: var(--pill);
   padding: 10px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
 }
 .toggle-btn.active { background: var(--black); color: var(--white); border-color: var(--black); }
 
@@ -382,7 +394,7 @@ button, input, select, textarea {
   border-top: 1px solid var(--line);
   display: flex;
   justify-content: space-around;
-  padding: 14px 8px 18px;
+  padding: 14px 8px calc(18px + env(safe-area-inset-bottom, 0px));
   z-index: 20;
 }
 .nav-btn {
@@ -400,7 +412,8 @@ button, input, select, textarea {
   letter-spacing: 0.06em;
   color: #c4c4c4;
 }
-.nav-icon { font-size: 18px; line-height: 1; }
+.nav-icon { display: flex; }
+.nav-icon svg { width: 18px; height: 18px; }
 .nav-label { font-size: 10px; }
 .nav-btn.active {
   color: var(--muted);
@@ -410,7 +423,7 @@ button, input, select, textarea {
 .toast[hidden] { display: none !important; }
 .toast {
   position: fixed;
-  bottom: 84px;
+  bottom: calc(84px + env(safe-area-inset-bottom, 0px));
   left: 50%;
   transform: translateX(-50%);
   background: var(--black);
@@ -438,7 +451,8 @@ button, input, select, textarea {
 /* responsive — nav becomes a side rail on wide screens */
 
 @media (max-width: 440px) {
-  #app { margin: 0; min-height: 100vh; border-radius: 0; border: none; }
+  #app { margin: 0; min-height: 100vh; min-height: 100dvh; border-radius: 0; border: none; }
+  #top-bar { padding-top: calc(14px + env(safe-area-inset-top, 0px)); }
 }
 
 @media (min-width: 720px) {
@@ -448,7 +462,7 @@ button, input, select, textarea {
 
 @media (min-width: 1000px) {
   #app {
-    max-width: 1180px;
+    max-width: min(1180px, 94vw);
     min-height: 760px;
     display: grid;
     grid-template-columns: 100px 1fr;
@@ -476,17 +490,41 @@ button, input, select, textarea {
     border-top: none;
     border-right: 1px solid var(--line);
   }
-  .nav-icon { font-size: 22px; }
+  .nav-icon svg { width: 22px; height: 22px; }
 
   .item-grid { grid-template-columns: repeat(4, 1fr); }
   .home-actions { gap: 18px; }
 }
 
+/* wide desktop monitors -- the 1180px cap above left a lot of dead space on
+   an ultrawide, so this scales the card up further instead of centring a
+   fixed-width box in the middle of the screen */
+@media (min-width: 1440px) {
+  #app { max-width: min(1560px, 90vw); }
+  #main-content { padding: 40px 64px 48px; }
+  .item-grid { grid-template-columns: repeat(5, 1fr); }
+}
+
+@media (min-width: 1920px) {
+  #app { max-width: min(1900px, 86vw); }
+  .item-grid { grid-template-columns: repeat(6, 1fr); }
+}
+
 /* auth screen -- hide the rest of the chrome while signed out */
-body.auth-mode #top-bar, body.auth-mode #bottom-nav { display: none; }
+body.auth-mode #top-bar, body.auth-mode #bottom-nav,
+body.public-mode #top-bar, body.public-mode #bottom-nav { display: none; }
 .auth-wrap { max-width: 320px; margin: 60px auto 0; display: flex; flex-direction: column; gap: 16px; }
 .auth-title { font-size: 22px; font-weight: 800; text-align: center; margin: 0; }
 .auth-subtitle { font-size: 13px; color: var(--muted); text-align: center; margin: 0 0 8px; }
 .auth-error { font-size: 12px; color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; border-radius: 10px; padding: 8px 12px; }
 .auth-switch { font-size: 12px; color: var(--muted); text-align: center; }
 .auth-switch button { background: none; border: none; color: var(--black); font-weight: 700; cursor: pointer; text-decoration: underline; }
+
+/* shared, read-only collection view -- opened via a ?share= link, no login needed */
+.public-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+.share-row { display: flex; gap: 8px; align-items: center; }
+.share-row input {
+  flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: var(--pill);
+  padding: 8px 14px; font-size: 12px; background: var(--fill); outline: none;
+}
