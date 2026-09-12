@@ -18,17 +18,20 @@ class ApiClient {
   #token;
 
   constructor() {
+    // load any saved token straight away, so a page refresh doesn't log the user out
     this.#token = localStorage.getItem(TOKEN_KEY) || null;
   }
 
   get isLoggedIn() { return Boolean(this.#token); }
 
+  // called after login/signup, and with null on logout
   setToken(token) {
     this.#token = token;
     if (token) localStorage.setItem(TOKEN_KEY, token);
     else localStorage.removeItem(TOKEN_KEY);
   }
 
+  // every API call goes through here, so auth headers and error handling only need to be written once
   async #request(path, options = {}) {
     const hadToken = Boolean(this.#token);
     const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
@@ -56,6 +59,8 @@ class ApiClient {
     return body;
   }
 
+  // one-line wrappers, each just names an endpoint so the rest of the app
+  // never has to build a URL or think about auth headers itself
   signup(email, password, displayName) {
     return this.#request('/auth/signup', { method: 'POST', body: JSON.stringify({ email, password, displayName }) });
   }
@@ -100,6 +105,8 @@ class Item {
   get id() { return this.#id; }
   get dateAdded() { return this.#dateAdded; }
 
+  // used by the collection search bar, checks name/series/category in one go
+  // so the search box doesn't need to know an item's exact field names
   matches(query) {
     if (!query) return true;
     const q = query.trim().toLowerCase();
@@ -111,6 +118,7 @@ class Item {
     );
   }
 
+  // turns this back into a plain object for sending to the backend
   toJSON() {
     return {
       id: this.#id,
@@ -132,6 +140,7 @@ class Item {
     return new Item(obj);
   }
 
+  // random enough for a personal collection, doesn't need to be a real UUID library
   static #generateId() {
     return 'item_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
   }
@@ -147,11 +156,14 @@ class CollectionStore {
     this.#api = api;
   }
 
+  // pulls the full collection down from the backend once, into #items,
+  // so the rest of the app can read it instantly without an await every time
   async load() {
     const rows = await this.#api.getItems();
     this.#items = rows.map(Item.fromJSON);
   }
 
+  // a copy of the array, so nothing outside this class can mutate #items directly
   getAll() {
     return [...this.#items];
   }
@@ -160,6 +172,7 @@ class CollectionStore {
     return this.#items.find((item) => item.id === id) || null;
   }
 
+  // saves to the backend first, only adds it locally once that succeeds
   async add(data) {
     const row = await this.#api.createItem(data);
     const item = Item.fromJSON(row);
@@ -176,6 +189,7 @@ class CollectionStore {
     return updated;
   }
 
+  // reuses update() rather than a separate endpoint, an image is just one more field
   async addImage(id, dataUrl) {
     const item = this.getById(id);
     if (!item) return null;
@@ -187,10 +201,12 @@ class CollectionStore {
     this.#items = this.#items.filter((item) => item.id !== id);
   }
 
+  // used by "clear all test data", deletes one at a time since there's no bulk-delete route
   async clearAll() {
     for (const item of [...this.#items]) await this.delete(item.id);
   }
 
+  // demo items for the "load sample items" link, so a new account isn't a blank page
   async loadSampleData() {
     const now = Date.now();
     const day = 86400000;
@@ -203,12 +219,14 @@ class CollectionStore {
     for (const sample of samples) await this.add(sample);
   }
 
+  // used to warn about buying something already owned, name match is case/whitespace insensitive
   findDuplicatesOf(name, excludeId = null) {
     const target = (name || '').trim().toLowerCase();
     if (!target) return [];
     return this.#items.filter((item) => item.id !== excludeId && item.name.trim().toLowerCase() === target);
   }
 
+  // backs the Collection screen's search bar and its category/condition filters, all in one pass
   search({ query = '', categories = [], conditions = [] } = {}) {
     return this.#items.filter((item) => {
       const matchesQuery = item.matches(query);
@@ -218,6 +236,7 @@ class CollectionStore {
     });
   }
 
+  // takes a copy rather than sorting in place, so the caller's own array order isn't changed by surprise
   sort(items, sortBy) {
     const sorted = [...items];
     switch (sortBy) {
@@ -235,6 +254,7 @@ class CollectionStore {
     return sorted;
   }
 
+  // everything the Stats screen needs, worked out in one place instead of the view doing its own counting
   stats() {
     const total = this.#items.length;
     const byCategory = {};
@@ -268,6 +288,7 @@ class ProfileStore {
     this.#api = api;
   }
 
+  // called once at startup so the greeting/profile menu have a name to show
   async load() {
     const data = await this.#api.getProfile();
     this.#name = data.displayName || 'Collector';
@@ -284,12 +305,15 @@ class ProfileStore {
   }
 }
 
+// browser built-in trick to safely turn user text into HTML, setting textContent
+// then reading innerHTML back escapes anything that could otherwise break the page
 function escapeHTML(str) {
   const div = document.createElement('div');
   div.textContent = str == null ? '' : String(str);
   return div.innerHTML;
 }
 
+// used on item cards with no photo, shows a big letter instead of a broken image
 function categoryInitial(category) {
   return (category || '?').charAt(0).toUpperCase();
 }
@@ -322,6 +346,8 @@ const ICON_MARKUP = {
   plus: '<path d="M12 5v14M5 12h14"/>',
 };
 
+// builds one inline svg icon from the shapes above, "active" swaps in the
+// filled version for icons like the star that need a different look when toggled on
 function icon(name, opts = {}) {
   const size = opts.size || 20;
   const strokeWidth = opts.strokeWidth || 1.8;
@@ -339,6 +365,8 @@ function parseDataUrl(dataUrl) {
   return { mediaType, base64 };
 }
 
+// shrinks and compresses a photo file before it's stored, keeps the
+// longest side within maxDim and re-encodes as jpeg at the given quality
 function resizeImageFile(file, maxDim = MAX_IMAGE_DIMENSION, quality = IMAGE_QUALITY) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -368,6 +396,9 @@ function resizeImageFile(file, maxDim = MAX_IMAGE_DIMENSION, quality = IMAGE_QUA
   });
 }
 
+// the main class, renders every screen and wires up every button/form on
+// the page. #view tracks which screen is currently showing, and #render()
+// redraws whichever one that is whenever something changes
 class CollectScanApp {
   #api;
   #store;
@@ -412,6 +443,7 @@ class CollectScanApp {
     this.#profile = new ProfileStore(this.#api);
   }
 
+  // called once when the page first loads
   async init() {
     this.#bindStaticControls();
 
@@ -431,6 +463,8 @@ class CollectScanApp {
     }
   }
 
+  // hides every normal screen and shows only the read-only public view,
+  // used instead of the usual login-gated flow when a share link is opened
   async #loadPublicView(token) {
     document.body.classList.add('public-mode');
     const views = ['auth', 'home', 'collection', 'detail', 'form', 'scan', 'stats', 'public'];
@@ -453,6 +487,8 @@ class CollectScanApp {
     }
   }
 
+  // groups the shared collection by category, same layout as the normal
+  // Collection screen but built from plain data with no click handlers at all
   #renderPublicCollection(data) {
     const container = document.getElementById('view-public');
     const items = data.items || [];
@@ -480,6 +516,8 @@ class CollectScanApp {
     `;
   }
 
+  // a stripped-down version of #itemCardHTML, no edit/favourite/delete
+  // controls, since a visitor with just the link can't own this collection
   #publicItemCardHTML(item) {
     const thumb = item.images && item.images[0]
       ? `<img src="${item.images[0]}" alt="">`
@@ -511,6 +549,7 @@ class CollectScanApp {
     }
   }
 
+  // switches which screen is showing, every button that changes screens goes through this
   #goTo(view, opts = {}) {
     if (this.#view === 'scan' && view !== 'scan') this.#stopCamera(); // turn the camera off if we leave scan
     this.#view = view;
@@ -525,6 +564,8 @@ class CollectScanApp {
     this.#render();
   }
 
+  // sets up the parts of the page that only need doing once, the top bar and
+  // nav icons (filled in here rather than hardcoded as emoji), and their clicks
   #bindStaticControls() {
     document.getElementById('back-btn').innerHTML = icon('back', { size: 16 });
     document.getElementById('profile-btn').innerHTML = icon('profile', { size: 16 });
@@ -588,6 +629,7 @@ class CollectScanApp {
     });
   }
 
+  // handles both login and signup, since they share the same form and just call a different endpoint
   async #submitAuth() {
     const email = document.getElementById('auth-email').value.trim();
     const password = document.getElementById('auth-password').value;
@@ -621,6 +663,8 @@ class CollectScanApp {
     }
   }
 
+  // shows/hides the right screen and picks which #render*() method draws it,
+  // called after almost every action that changes what's on screen
   #render() {
     const titleEl = document.getElementById('top-bar-title');
     document.body.classList.toggle('auth-mode', this.#view === 'auth');
@@ -669,6 +713,7 @@ class CollectScanApp {
     }
   }
 
+  // shows the small black toast message at the bottom of the screen for a couple of seconds
   #notify(message) {
     const toast = document.getElementById('toast');
     toast.textContent = message;
@@ -686,6 +731,7 @@ class CollectScanApp {
     }
   }
 
+  // the Home screen, favourites carousel if there are any, otherwise recent items
   #renderHome() {
     const container = document.getElementById('view-home');
     const items = this.#store.getAll();
@@ -751,6 +797,9 @@ class CollectScanApp {
     document.getElementById('home-view-collection').addEventListener('click', () => this.#goTo('collection'));
   }
 
+  // the Collection screen's search bar, sort/filter buttons and the empty state,
+  // the actual list of items is drawn separately by #renderCollectionResults()
+  // so typing in the search box doesn't have to rebuild this whole toolbar
   #renderCollection() {
     const container = document.getElementById('view-collection');
     const items = this.#store.getAll();
@@ -830,6 +879,8 @@ class CollectScanApp {
     this.#renderCollectionResults();
   }
 
+  // the dropdown-style panel under the toolbar, shows sort options or filter
+  // chips depending on which button was last pressed, or nothing if neither is open
   #renderCollectionPanel() {
     const slot = document.getElementById('panel-slot');
     if (!slot) return;
@@ -891,6 +942,8 @@ class CollectScanApp {
     }
   }
 
+  // applies the current search/filter/sort and draws the actual item grid,
+  // grouped by category, redrawn on its own whenever any of those change
   #renderCollectionResults() {
     const slot = document.getElementById('results-slot');
     if (!slot) return;
@@ -925,6 +978,7 @@ class CollectScanApp {
     }
   }
 
+  // one item tile in the collection grid, falls back to a plain letter if there's no photo yet
   #itemCardHTML(item) {
     const thumb = item.images[0]
       ? `<img src="${item.images[0]}" alt="">`
@@ -1021,6 +1075,8 @@ class CollectScanApp {
     this.#renderDeleteSlot(item.id);
   }
 
+  // two-step delete, shows a plain button first and only shows the real
+  // confirm/cancel prompt once that's pressed, so deleting can't happen by accident
   #renderDeleteSlot(itemId, confirming = false) {
     const slot = document.getElementById('delete-slot');
     if (!slot) return;
@@ -1065,6 +1121,7 @@ class CollectScanApp {
     if (data.name) this.#checkDuplicateWarning(data.id);
   }
 
+  // builds the add/edit form markup, shared by both modes, #formMode just changes the button label
   #formHTML(data) {
     const categoryOptions = CATEGORIES.map((c) => `<option value="${c}"${data.category === c ? ' selected' : ''}>${c}</option>`).join('');
     const conditionOptions = `<option value="">Unspecified</option>` + CONDITIONS.map((c) => `<option value="${c}"${data.condition === c ? ' selected' : ''}>${c}</option>`).join('');
@@ -1103,7 +1160,8 @@ class CollectScanApp {
       <div class="field-row">
         <div class="field">
           <label>Year</label>
-          <input type="text" id="field-year" placeholder="e.g. 2025" value="${escapeHTML(data.year || '')}">
+          <input type="text" inputmode="numeric" id="field-year" placeholder="e.g. 2025" value="${escapeHTML(data.year || '')}">
+          <p class="field-error" id="year-error" hidden></p>
         </div>
         <div class="field">
           <label>Print / Edition #</label>
@@ -1128,6 +1186,9 @@ class CollectScanApp {
     `;
   }
 
+  // redraws just the photo thumbnails plus the upload/camera buttons, kept
+  // separate from the rest of the form so adding/removing a photo doesn't
+  // have to rebuild every other field and lose whatever the user was typing
   #renderPhotoRow() {
     const row = document.getElementById('photo-row');
     if (!row) return;
@@ -1150,6 +1211,8 @@ class CollectScanApp {
     document.getElementById('photo-camera-btn').addEventListener('click', () => document.getElementById('camera-input').click());
   }
 
+  // wires up every control on the add/edit form, photo handling, toggles,
+  // typing the name (which re-checks for a duplicate), and the save/cancel buttons
   #bindFormEvents(data) {
     this.#renderPhotoRow();
 
@@ -1188,6 +1251,9 @@ class CollectScanApp {
     document.getElementById('form-save').addEventListener('click', () => this.#submitForm(data.id));
   }
 
+  // the core duplicate-purchase warning, called both while typing the name and
+  // once right after the form loads (see #renderForm), since a name arriving
+  // pre-filled from Auto-Identify never fires a typing event on its own
   #checkDuplicateWarning(currentId) {
     const name = document.getElementById('field-name').value;
     const dups = this.#store.findDuplicatesOf(name, currentId || null);
@@ -1203,6 +1269,9 @@ class CollectScanApp {
     }
   }
 
+  // validates the name (existence check) and year (type + range check) before
+  // saving, this is the only place both checks are enforced, so nothing can
+  // reach the backend with an empty name or a year that isn't a real year
   async #submitForm(existingId) {
     const name = document.getElementById('field-name').value.trim();
     const nameInput = document.getElementById('field-name');
@@ -1216,13 +1285,31 @@ class CollectScanApp {
     nameInput.classList.remove('invalid');
     errorEl.hidden = true;
 
+    // year is optional, but if the person does enter something it has to actually
+    // be a plausible year, this is the type check + range check the field needs.
+    // trading cards and toys can carry a print year, but nothing before 1900 or
+    // more than a year into the future makes sense for a real physical item
+    const yearInput = document.getElementById('field-year');
+    const yearError = document.getElementById('year-error');
+    const yearRaw = yearInput.value.trim();
+    const currentYear = new Date().getFullYear();
+
+    if (yearRaw && (!/^\d{4}$/.test(yearRaw) || Number(yearRaw) < 1900 || Number(yearRaw) > currentYear + 1)) {
+      yearInput.classList.add('invalid');
+      yearError.textContent = `Enter a 4-digit year between 1900 and ${currentYear + 1}.`;
+      yearError.hidden = false;
+      return;
+    }
+    yearInput.classList.remove('invalid');
+    yearError.hidden = true;
+
     const formData = {
       id: existingId || undefined,
       name,
       category: document.getElementById('field-category').value,
       condition: document.getElementById('field-condition').value,
       series: document.getElementById('field-series').value.trim(),
-      year: document.getElementById('field-year').value.trim(),
+      year: yearRaw,
       printNumber: document.getElementById('field-print').value.trim(),
       autograph: this.#formAutograph,
       favourite: this.#formFavourite,
@@ -1512,6 +1599,8 @@ class CollectScanApp {
     this.#renderResetSlot(false);
   }
 
+  // fetches the account's share link (creating one on first use) or generates
+  // a brand new one if forceReset is true, which quietly breaks any old link
   async #loadShareSlot(forceReset = false) {
     const slot = document.getElementById('share-slot');
     if (!slot) return;
@@ -1541,6 +1630,7 @@ class CollectScanApp {
     }
   }
 
+  // same two-step confirm pattern as #renderDeleteSlot, but for wiping the whole collection at once
   #renderResetSlot(confirming) {
     const slot = document.getElementById('reset-slot');
     if (!slot) return;
